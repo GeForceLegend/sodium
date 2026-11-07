@@ -1,9 +1,9 @@
 package net.caffeinemc.mods.sodium.client.render.chunk;
 
-import com.mojang.renderpearl.api.buffers.GpuBuffer;
-import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.renderpearl.api.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import net.caffeinemc.mods.sodium.client.SodiumClientMod;
 import net.caffeinemc.mods.sodium.client.gpu.GPULimits;
 import net.caffeinemc.mods.sodium.client.render.chunk.region.RenderRegion;
@@ -16,9 +16,9 @@ import net.minecraft.client.TextureFilteringMethod;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.DynamicGpuDataStorage;
 import net.minecraft.client.renderer.DynamicGpuDataStorageMapped;
-import net.minecraft.client.renderer.DynamicGpuDataStorageNonMapped;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import org.joml.Matrix4f;
+import org.joml.Vector2fc;
 import org.jspecify.annotations.NonNull;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
@@ -112,8 +112,8 @@ public class UniformBufferManager {
                 .getTexture(TextureAtlas.LOCATION_BLOCKS);
 
         this.uniformData = this.uniformStorage.writeData(new GlobalUniforms(
-                new Matrix4f(matrices.projection()),
-                new Matrix4f(matrices.modelView()),
+                new Matrix4f(matrices.projection()).mul(matrices.modelView()),
+                createWindowToWorldMatrix(matrices),
                 fogParameters.red(), fogParameters.green(), fogParameters.blue(), fogParameters.alpha(),
                 cameraTransform.fracX, cameraTransform.fracY, cameraTransform.fracZ,
                 fogParameters.environmentalStart(), fogParameters.environmentalEnd(),
@@ -124,6 +124,16 @@ public class UniformBufferManager {
                 (float) (1.0 / (Minecraft.getInstance().options.chunkSectionFadeInTime().get() * 1000.0)),
                 Minecraft.getInstance().options.textureFiltering().get() == TextureFilteringMethod.RGSS ? 1 : 0
         ));
+    }
+
+    // construct a matrix that maps from window coordinates to camera-relative world space. This is the inverse of the combination of the entire transform chain from world to window space.
+    private static Matrix4f createWindowToWorldMatrix(ChunkRenderMatrices matrices) {
+        Vector2fc viewportSize = matrices.viewportSize();
+
+        return new Matrix4f(matrices.modelView()).invertAffine()
+                .mul(new Matrix4f(matrices.projection()).invertPerspective())
+                .translate(-1.0f, -1.0f, -1.0f)
+                .scale(2.0f / viewportSize.x(), 2.0f / viewportSize.y(), 2.0f);
     }
 
     public GpuBufferSlice getUniformBuffer() {
@@ -186,8 +196,8 @@ public class UniformBufferManager {
     }
 
     private record GlobalUniforms(
-            Matrix4f projection,
-            Matrix4f modelView,
+            Matrix4f modelViewProjection,
+            Matrix4f windowToWorld,
             float fogRed,
             float fogGreen,
             float fogBlue,
@@ -209,8 +219,8 @@ public class UniformBufferManager {
         @Override
         public void write(@NonNull ByteBuffer byteBuffer) {
             Std140Builder.intoBuffer(byteBuffer)
-                    .putMat4f(this.projection)
-                    .putMat4f(this.modelView)
+                    .putMat4f(this.modelViewProjection)
+                    .putMat4f(this.windowToWorld)
                     .putVec4(this.fogRed, this.fogGreen, this.fogBlue, this.fogAlpha)
                     .putVec3(this.cameraOffsetX, this.cameraOffsetY, this.cameraOffsetZ)
                     .putVec2(this.environmentalFogStart, this.environmentalFogEnd)
